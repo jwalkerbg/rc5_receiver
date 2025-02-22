@@ -12,5 +12,10 @@
     "idf.openOcdConfigs": [
         "interface/ftdi/esp32_devkitj_v1.cfg",
         "target/esp32s3.cfg"
-    ]
+    ],
+    "files.associations": {
+        "esp_log.h": "c",
+        "soc_caps.h": "c"
+    },
+    "idf.portWin": "COM14"
 }
