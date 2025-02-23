@@ -30,7 +30,7 @@ static char* TAG = "RMT";
 #define RC5_BUFFER_SIZE 64
 #define RC5_EXPECTED_BITS 14
 #define RC5_SYMBOL_DURATION_US 889       // Manchester symbol duration (approximately 889 µs)
-#define RC5_TOLERANCE_US 200             // Tolerance for signal timing (±200 µs)
+#define RC5_TOLERANCE_US 300             // Tolerance for signal timing (±200 µs)
 
 // GPIOs for LEDs
 #define LED1_GPIO GPIO_NUM_14
@@ -44,6 +44,8 @@ static char* TAG = "RMT";
 static TaskHandle_t rc5_task_handle = NULL;
 
 rmt_symbol_word_t rc5_buffer[RC5_BUFFER_SIZE];
+rmt_symbol_word_t rc5_buffer_cp[RC5_BUFFER_SIZE];
+uint32_t scnt = 0;
 
 // Function to initialize LEDs
 void init_leds(void) {
@@ -72,8 +74,39 @@ static bool is_duration_within_tolerance(uint16_t duration, uint16_t expected) {
            (duration < (expected + RC5_TOLERANCE_US));
 }
 
+uint16_t decode_rc5_manchester(const rmt_symbol_word_t *symbols, size_t symbol_count)
+{
+    uint16_t rc5_data = 0;
+    int bit_count = 0;
+
+    for (int i = 0; i < symbol_count -1; i++) {
+        uint32_t high_time = symbols[i].duration0;
+        uint32_t low_time = symbols[i].duration1;
+        uint32_t next_high_time = symbols[i + 1].duration0;
+        uint32_t next_low_time = symbols[i + 1].duration1;
+
+        if (bit_count < RC5_EXPECTED_BITS) {
+            // Manchester decoding for RC-5
+            if (high_time > RC5_SYMBOL_DURATION_US - RC5_TOLERANCE_US &&
+                high_time < RC5_SYMBOL_DURATION_US + RC5_TOLERANCE_US &&
+                next_low_time > RC5_SYMBOL_DURATION_US - RC5_TOLERANCE_US &&
+                next_low_time < RC5_SYMBOL_DURATION_US + RC5_TOLERANCE_US) {
+                rc5_data = (rc5_data << 1) | 1;
+            } else if (low_time > RC5_SYMBOL_DURATION_US - RC5_TOLERANCE_US &&
+                       low_time < RC5_SYMBOL_DURATION_US + RC5_TOLERANCE_US &&
+                       next_high_time > RC5_SYMBOL_DURATION_US - RC5_TOLERANCE_US &&
+                       next_high_time < RC5_SYMBOL_DURATION_US + RC5_TOLERANCE_US) {
+                rc5_data = (rc5_data << 1) | 0;
+            }
+            bit_count++;
+        }
+        return rc5_data;
+    }
+    return 0;
+}
+
 // Manchester decoding of RC-5 symbols
-uint16_t decode_rc5_manchester(const rmt_symbol_word_t *symbols, size_t symbol_count) {
+uint16_t decode_rc5_manchester_(const rmt_symbol_word_t *symbols, size_t symbol_count) {
     if (symbol_count < RC5_EXPECTED_BITS * 2) {
         return symbol_count | 0x80; // Error: not enough symbols
     }
@@ -117,11 +150,15 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
     if (received_symbols != 0) {
         rmt_symbol_word_t *symbols = event_data->received_symbols;
 
-        uint16_t rc5_data = decode_rc5_manchester(symbols, received_symbols);
+        //uint16_t rc5_data = decode_rc5_manchester(symbols, received_symbols);
         //if (rc5_data = 0) {
             //ESP_LOGI(TAG, "Decoded RC-5 data: 0x%04X", rc5_data);
 
-            uint8_t command = rc5_data; // Extract the 6-bit command
+            uint8_t command = 0; //rc5_data; // Extract the 6-bit command
+            for (int i = 0; i < received_symbols; i++) {
+                rc5_buffer_cp[i] = symbols[i];
+            }
+            scnt = received_symbols;
 
             // Notify the main task to process the command
             if (rc5_task_handle != NULL) {
@@ -146,6 +183,36 @@ void rc5_receive_task(void *arg) {
         if (xTaskNotifyWait(0, 0, &cmd, portMAX_DELAY)) {
             ESP_LOGI(TAG, "Handling command: 0x%04lX", cmd);
             set_leds(cmd);
+            for (int i = 0; i < scnt; i++) {
+                ESP_LOGI(TAG, "Symbol %d: %04lX: %4d %4d %d %d", i, rc5_buffer_cp[i].val, rc5_buffer_cp[i].duration0, rc5_buffer_cp[i].duration1, rc5_buffer_cp[i].level0, rc5_buffer_cp[i].level1);
+            }
+            uint16_t rc_data = 0;
+            uint16_t bits = 0;
+            bool accept_bit = true;
+            for (int i = 0; i < scnt; i++) {
+                if (accept_bit) {
+                    rc_data = (rc_data << 1) | rc5_buffer_cp[i].level0;
+                    bits++;
+                    if (rc5_buffer_cp[i].duration0 < 1050) {
+                        accept_bit = false;
+                    }
+                }
+                else {
+                    accept_bit = true;
+                }
+
+                if (accept_bit) {
+                    rc_data = (rc_data << 1) | rc5_buffer_cp[i].level1;
+                    bits++;
+                    if (rc5_buffer_cp[i].duration1 < 1050) {
+                        accept_bit = false;
+                    }
+                }
+                else {
+                    accept_bit = true;
+                }
+            }
+            ESP_LOGI(TAG, "RC5 data: 0x%04X", rc_data);
         }
     }
 }
