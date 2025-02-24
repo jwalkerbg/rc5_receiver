@@ -39,7 +39,6 @@ static TaskHandle_t rc5_task_handle = NULL;
 
 rmt_symbol_word_t rc5_buffer[RC5_BUFFER_SIZE];
 rmt_symbol_word_t rc5_buffer_cp[RC5_BUFFER_SIZE];
-uint32_t scnt = 0;
 
 rmt_receive_config_t receive_config = {
     .signal_range_min_ns = 1200,
@@ -67,7 +66,6 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
         for (int i = 0; i < num_symbols; i++) {
             rc5_buffer_cp[i] = received_symbols[i];
         }
-        scnt = num_symbols;
 
         // Notify the main task to process the command
         if (rc5_task_handle != NULL) {
@@ -81,23 +79,32 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
     return pxHigherPriorityTaskWoken == pdTRUE; // No need to yield to a higher-priority task
 }
 
+typedef void (*rc5_handler_t)(rc5_data_t rc5_data);
+
 static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count);
 
 // Main task to handle received RC-5 commands
 void rc5_receive_task(void *arg)
 {
     uint32_t num_symbols;
+    rc5_handler_t rc5h = (rc5_handler_t)arg;
+
+    ESP_LOGI(TAG, "RC5 receive task started");
     while (true) {
         if (xTaskNotifyWait(0, 0, &num_symbols, portMAX_DELAY)) {
-            ESP_LOGI(TAG, "Handling command: %lu", num_symbols);
+            ESP_LOGI(TAG, "Handling %lu symbols", num_symbols);
             for (int i = 0; i < num_symbols; i++) {
-                ESP_LOGI(TAG, "Symbol %d: %04lX: %4d %4d %d %d", i, rc5_buffer_cp[i].val, rc5_buffer_cp[i].duration0, rc5_buffer_cp[i].duration1, rc5_buffer_cp[i].level0, rc5_buffer_cp[i].level1);
+                ESP_LOGD(TAG, "Symbol %d: %04lX: %4d %4d %d %d", i, rc5_buffer_cp[i].val, rc5_buffer_cp[i].duration0, rc5_buffer_cp[i].duration1, rc5_buffer_cp[i].level0, rc5_buffer_cp[i].level1);
             }
-            rc5_data_t rc5_data = rc5_decoder(rc5_buffer_cp, scnt);
+            rc5_data_t rc5_data = rc5_decoder(rc5_buffer_cp, num_symbols);
 
-            ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d", rc5_data.frame, rc5_data.command, rc5_data.address, rc5_data.toggle);
+            if (rc5h != NULL) {
+                rc5h(rc5_data);
+            }
         }
     }
+    ESP_LOGI(TAG, "RC5 receive task ended");
+    vTaskDelete(NULL);
 }
 
 static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
@@ -127,6 +134,12 @@ static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
     }
 
     return rc_data;
+}
+
+// Set the RC5 handler
+void rc5_handler(rc5_data_t rc5_data)
+{
+    ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d", rc5_data.frame, rc5_data.command, rc5_data.address, rc5_data.toggle);
 }
 
 // Application main
@@ -170,5 +183,5 @@ void app_main(void)
     ESP_ERROR_CHECK(rmt_enable(rx_channel));
     ESP_ERROR_CHECK(rmt_receive(rx_channel, rc5_buffer, sizeof(rc5_buffer), &receive_config));
 
-    xTaskCreate(rc5_receive_task, "rc5_receive_task", 4096, NULL, 10, &rc5_task_handle);
+    xTaskCreate(rc5_receive_task, "rc5_receive_task", 4096, rc5_handler, 10, &rc5_task_handle);
 }
