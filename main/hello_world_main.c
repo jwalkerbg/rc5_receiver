@@ -123,21 +123,21 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
     if (received_symbols != 0) {
         rmt_symbol_word_t *symbols = event_data->received_symbols;
 
-            uint8_t command = 0; //rc5_data; // Extract the 6-bit command
-            for (int i = 0; i < received_symbols; i++) {
-                rc5_buffer_cp[i] = symbols[i];
-            }
-            scnt = received_symbols;
+        uint8_t command = 0; //rc5_data; // Extract the 6-bit command
+        for (int i = 0; i < received_symbols; i++) {
+            rc5_buffer_cp[i] = symbols[i];
+        }
+        scnt = received_symbols;
 
-            // Notify the main task to process the command
-            if (rc5_task_handle != NULL) {
-                xTaskNotify(rc5_task_handle, command, eSetValueWithOverwrite);
-            }
-            }
+        // Notify the main task to process the command
+        if (rc5_task_handle != NULL) {
+            xTaskNotify(rc5_task_handle, command, eSetValueWithOverwrite);
+        }
+    }
 
     // Re-start the receiver for the next packet
     rmt_receive(channel, rc5_buffer, sizeof(rc5_buffer), &receive_config);
-    
+
     return false; // No need to yield to a higher-priority task
 }
 
