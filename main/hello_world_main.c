@@ -56,6 +56,8 @@ static bool is_duration_within_tolerance(uint16_t duration, uint16_t expected) {
 
 IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *edata, void *user_ctx)
 {
+    BaseType_t pxHigherPriorityTaskWoken = pdFALSE;
+
     const rmt_rx_done_event_data_t *event_data = (const rmt_rx_done_event_data_t *)edata;
     size_t num_symbols = event_data->num_symbols;
 
@@ -70,14 +72,14 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
 
         // Notify the main task to process the command
         if (rc5_task_handle != NULL) {
-            xTaskNotify(rc5_task_handle, command, eSetValueWithOverwrite);
+            xTaskNotifyFromISR(rc5_task_handle, command, eSetValueWithOverwrite, &pxHigherPriorityTaskWoken);
         }
     }
 
     // Re-start the receiver for the next packet
     rmt_receive(channel, rc5_buffer, sizeof(rc5_buffer), &receive_config);
 
-    return false; // No need to yield to a higher-priority task
+    return pxHigherPriorityTaskWoken == pdTRUE; // No need to yield to a higher-priority task
 }
 
 static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count);
