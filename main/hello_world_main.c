@@ -32,41 +32,16 @@ static char* TAG = "RMT";
 #define RC5_SYMBOL_DURATION_US 889       // Manchester symbol duration (approximately 889 µs)
 #define RC5_TOLERANCE_US 300             // Tolerance for signal timing (±200 µs)
 
-// GPIOs for LEDs
-#define LED1_GPIO GPIO_NUM_14
-#define LED2_GPIO GPIO_NUM_15
-#define LED3_GPIO GPIO_NUM_16
-
-#define CMD_LED1 0x10
-#define CMD_LED2 0x20
-#define CMD_LED3 0x30
-
 static TaskHandle_t rc5_task_handle = NULL;
 
 rmt_symbol_word_t rc5_buffer[RC5_BUFFER_SIZE];
 rmt_symbol_word_t rc5_buffer_cp[RC5_BUFFER_SIZE];
 uint32_t scnt = 0;
 
-// Function to initialize LEDs
-void init_leds(void) {
-    gpio_config_t io_conf = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << LED1_GPIO) | (1ULL << LED2_GPIO) | (1ULL << LED3_GPIO),
-    };
-    gpio_config(&io_conf);
-}
-
 rmt_receive_config_t receive_config = {
     .signal_range_min_ns = 1200,
     .signal_range_max_ns = 30 * 1000 * 1000,
 };
-
-// LED control
-void set_leds(uint8_t cmd) {
-    gpio_set_level(LED1_GPIO, (cmd == CMD_LED1) ? 1 : 0);
-    gpio_set_level(LED2_GPIO, (cmd == CMD_LED2) ? 1 : 0);
-    gpio_set_level(LED3_GPIO, (cmd == CMD_LED3) ? 1 : 0);
-}
 
 // Helper function to check if a duration is within tolerance
 static bool is_duration_within_tolerance(uint16_t duration, uint16_t expected) {
@@ -171,8 +146,7 @@ void rc5_receive_task(void *arg) {
     uint32_t cmd;
     while (true) {
         if (xTaskNotifyWait(0, 0, &cmd, portMAX_DELAY)) {
-            ESP_LOGI(TAG, "Handling command: 0x%04lX", cmd);
-            set_leds(cmd);
+            ESP_LOGI(TAG, "Handling command: %lu", cmd);
             for (int i = 0; i < scnt; i++) {
                 ESP_LOGI(TAG, "Symbol %d: %04lX: %4d %4d %d %d", i, rc5_buffer_cp[i].val, rc5_buffer_cp[i].duration0, rc5_buffer_cp[i].duration1, rc5_buffer_cp[i].level0, rc5_buffer_cp[i].level1);
             }
@@ -210,13 +184,6 @@ void rc5_receive_task(void *arg) {
 // Application main
 void app_main(void)
 {
-    // Configure LEDs
-    gpio_config_t io_conf = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << LED1_GPIO) | (1ULL << LED2_GPIO) | (1ULL << LED3_GPIO)
-    };
-    gpio_config(&io_conf);
-
     gpio_config_t io_rmt_conf = {
         .pin_bit_mask = 1ULL << RMT_RX_GPIO,
         .mode = GPIO_MODE_INPUT,
