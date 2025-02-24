@@ -64,7 +64,6 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
     if (num_symbols != 0) {
         rmt_symbol_word_t *received_symbols = event_data->received_symbols;
 
-        uint8_t command = 0; //rc5_data; // Extract the 6-bit command
         for (int i = 0; i < num_symbols; i++) {
             rc5_buffer_cp[i] = received_symbols[i];
         }
@@ -72,7 +71,7 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
 
         // Notify the main task to process the command
         if (rc5_task_handle != NULL) {
-            xTaskNotifyFromISR(rc5_task_handle, command, eSetValueWithOverwrite, &pxHigherPriorityTaskWoken);
+            xTaskNotifyFromISR(rc5_task_handle, num_symbols, eSetValueWithOverwrite, &pxHigherPriorityTaskWoken);
         }
     }
 
@@ -85,12 +84,13 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
 static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count);
 
 // Main task to handle received RC-5 commands
-void rc5_receive_task(void *arg) {
-    uint32_t cmd;
+void rc5_receive_task(void *arg)
+{
+    uint32_t num_symbols;
     while (true) {
-        if (xTaskNotifyWait(0, 0, &cmd, portMAX_DELAY)) {
-            ESP_LOGI(TAG, "Handling command: %lu", cmd);
-            for (int i = 0; i < scnt; i++) {
+        if (xTaskNotifyWait(0, 0, &num_symbols, portMAX_DELAY)) {
+            ESP_LOGI(TAG, "Handling command: %lu", num_symbols);
+            for (int i = 0; i < num_symbols; i++) {
                 ESP_LOGI(TAG, "Symbol %d: %04lX: %4d %4d %d %d", i, rc5_buffer_cp[i].val, rc5_buffer_cp[i].duration0, rc5_buffer_cp[i].duration1, rc5_buffer_cp[i].level0, rc5_buffer_cp[i].level1);
             }
             rc5_data_t rc5_data = rc5_decoder(rc5_buffer_cp, scnt);
