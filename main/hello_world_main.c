@@ -32,6 +32,16 @@ static char* TAG = "RMT";
 #define RC5_SYMBOL_DURATION_US 889       // Manchester symbol duration (approximately 889 µs)
 #define RC5_TOLERANCE_US 300             // Tolerance for signal timing (±200 µs)
 
+typedef union {
+    struct {
+        uint16_t command:6;
+        uint16_t address:5;
+        uint16_t toggle:1;
+        uint16_t reserved:4;
+    };
+    uint16_t frame;
+} rc5_data_t;   // RC5 command data structure
+
 static TaskHandle_t rc5_task_handle = NULL;
 
 rmt_symbol_word_t rc5_buffer[RC5_BUFFER_SIZE];
@@ -77,6 +87,8 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
     return false; // No need to yield to a higher-priority task
 }
 
+static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count);
+
 // Main task to handle received RC-5 commands
 void rc5_receive_task(void *arg) {
     uint32_t cmd;
@@ -86,35 +98,40 @@ void rc5_receive_task(void *arg) {
             for (int i = 0; i < scnt; i++) {
                 ESP_LOGI(TAG, "Symbol %d: %04lX: %4d %4d %d %d", i, rc5_buffer_cp[i].val, rc5_buffer_cp[i].duration0, rc5_buffer_cp[i].duration1, rc5_buffer_cp[i].level0, rc5_buffer_cp[i].level1);
             }
-            uint16_t rc_data = 0;
-            bool accept_bit = true;
-            for (int i = 0; i < scnt; i++) {
-                if (accept_bit) {
-                    rc_data = (rc_data << 1) | rc5_buffer_cp[i].level0;
-                    if (rc5_buffer_cp[i].duration0 < 1050) {
-                        accept_bit = false;
-                    }
-                }
-                else {
-                    accept_bit = true;
-                }
+            rc5_data_t rc5_data = rc5_decoder(rc5_buffer_cp, scnt);
 
-                if (accept_bit) {
-                    rc_data = (rc_data << 1) | rc5_buffer_cp[i].level1;
-                    if (rc5_buffer_cp[i].duration1 < 1050) {
-                        accept_bit = false;
-                    }
-                }
-                else {
-                    accept_bit = true;
-                }
-            }
-            uint16_t command = rc_data & 0x3F;
-            uint16_t address = (rc_data >> 6) & 0x1F;
-            uint16_t toggle = (rc_data >> 11) & 0x1;
-            ESP_LOGI(TAG, "RC5 command: frame: 0x%04X, 0x%02X, address: 0x%02X, toggle: %d", rc_data, command, address, toggle);
+            ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d", rc5_data.frame, rc5_data.command, rc5_data.address, rc5_data.toggle);
         }
     }
+}
+
+static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
+{
+    rc5_data_t rc_data = { 0 };
+    bool accept_bit = true;
+    for (int i = 0; i < count; i++) {
+        if (accept_bit) {
+            rc_data.frame = (rc_data.frame << 1) | symbols[i].level0;
+            if (symbols[i].duration0 < 1050) {
+                accept_bit = false;
+            }
+        }
+        else {
+            accept_bit = true;
+        }
+
+        if (accept_bit) {
+            rc_data.frame = (rc_data.frame << 1) | symbols[i].level1;
+            if (symbols[i].duration1 < 1050) {
+                accept_bit = false;
+            }
+        }
+        else {
+            accept_bit = true;
+        }
+    }
+
+    return rc_data;
 }
 
 // Application main
