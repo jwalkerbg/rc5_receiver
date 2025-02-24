@@ -136,21 +136,11 @@ static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
     return rc_data;
 }
 
-// Set the RC5 handler
-void rc5_handler(rc5_data_t rc5_data)
+esp_err_t rc5_setup(rc5_handler_t rc5_handler)
 {
-    ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d", rc5_data.frame, rc5_data.command, rc5_data.address, rc5_data.toggle);
-}
-
-// Application main
-void app_main(void)
-{
-    gpio_config_t io_rmt_conf = {
-        .pin_bit_mask = 1ULL << RMT_RX_GPIO,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-    };
-    ESP_ERROR_CHECK(gpio_config(&io_rmt_conf));
+    if (rc5_handler == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
     rmt_rx_channel_config_t rx_config = {
         .clk_src = RMT_CLK_SRC_APB,
@@ -172,11 +162,33 @@ void app_main(void)
         .on_recv_done = rmt_rx_done_callback, // Set the callback function
     };
 
-    vTaskDelay(pdMS_TO_TICKS(10000));
-
     ESP_ERROR_CHECK(rmt_rx_register_event_callbacks(rx_channel, &cbs, NULL));
     ESP_ERROR_CHECK(rmt_enable(rx_channel));
     ESP_ERROR_CHECK(rmt_receive(rx_channel, rc5_buffer, sizeof(rc5_buffer), &receive_config));
 
     xTaskCreate(rc5_receive_task, "rc5_receive_task", 4096, rc5_handler, 10, &rc5_task_handle);
+
+    return ESP_OK;
+}
+
+///////////////////////////////////////////////////////////////
+
+// Set the RC5 handler
+void rc5_handler(rc5_data_t rc5_data)
+{
+    ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d", rc5_data.frame, rc5_data.command, rc5_data.address, rc5_data.toggle);
+}
+
+// Application main
+void app_main(void)
+{
+    gpio_config_t io_rmt_conf = {
+        .pin_bit_mask = 1ULL << RMT_RX_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_rmt_conf));
+
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    rc5_setup(rc5_handler);
 }
