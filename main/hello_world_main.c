@@ -30,7 +30,7 @@ static char* TAG = "RMT";
 #define RC5_BUFFER_SIZE 64
 #define RC5_EXPECTED_BITS 14
 #define RC5_SYMBOL_DURATION_US 889       // Manchester symbol duration (approximately 889 µs)
-#define RC5_TOLERANCE_US 300             // Tolerance for signal timing (±200 µs)
+#define RC5_TOLERANCE_US 200             // Tolerance for signal timing (±200 µs)
 
 typedef union {
     struct {
