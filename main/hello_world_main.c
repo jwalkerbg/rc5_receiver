@@ -187,13 +187,11 @@ void rc5_receive_task(void *arg) {
                 ESP_LOGI(TAG, "Symbol %d: %04lX: %4d %4d %d %d", i, rc5_buffer_cp[i].val, rc5_buffer_cp[i].duration0, rc5_buffer_cp[i].duration1, rc5_buffer_cp[i].level0, rc5_buffer_cp[i].level1);
             }
             uint16_t rc_data = 0;
-            uint16_t bits = 0;
-            bool accept_bit = true;
+                        bool accept_bit = true;
             for (int i = 0; i < scnt; i++) {
                 if (accept_bit) {
                     rc_data = (rc_data << 1) | rc5_buffer_cp[i].level0;
-                    bits++;
-                    if (rc5_buffer_cp[i].duration0 < 1050) {
+                                        if (rc5_buffer_cp[i].duration0 < 1050) {
                         accept_bit = false;
                     }
                 }
@@ -203,8 +201,7 @@ void rc5_receive_task(void *arg) {
 
                 if (accept_bit) {
                     rc_data = (rc_data << 1) | rc5_buffer_cp[i].level1;
-                    bits++;
-                    if (rc5_buffer_cp[i].duration1 < 1050) {
+                                        if (rc5_buffer_cp[i].duration1 < 1050) {
                         accept_bit = false;
                     }
                 }
@@ -212,7 +209,10 @@ void rc5_receive_task(void *arg) {
                     accept_bit = true;
                 }
             }
-            ESP_LOGI(TAG, "RC5 data: 0x%04X", rc_data);
+uint16_t command = rc_data & 0x3F;
+            uint16_t address = (rc_data >> 6) & 0x1F;
+            uint16_t toggle = (rc_data >> 11) & 0x1;
+            ESP_LOGI(TAG, "RC5 command: frame: 0x%04X, 0x%02X, address: 0x%02X, toggle: %d", rc_data, command, address, toggle);
         }
     }
 }
