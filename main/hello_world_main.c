@@ -172,11 +172,6 @@ void app_main(void)
         .on_recv_done = rmt_rx_done_callback, // Set the callback function
     };
 
-    // ESP_LOGI(TAG, "rx_channel = %p, cbs = %p", rx_channel, &cbs);
-    // do {
-    //     vTaskDelay(pdMS_TO_TICKS(1000));
-    // } while(1);
-
     vTaskDelay(pdMS_TO_TICKS(10000));
 
     ESP_ERROR_CHECK(rmt_rx_register_event_callbacks(rx_channel, &cbs, NULL));
