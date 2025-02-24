@@ -145,14 +145,8 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
     const rmt_rx_done_event_data_t *event_data = (const rmt_rx_done_event_data_t *)edata;
     size_t received_symbols = event_data->num_symbols;
 
-    //ESP_LOGI(TAG, "Received %zu symbols", received_symbols);
-
     if (received_symbols != 0) {
         rmt_symbol_word_t *symbols = event_data->received_symbols;
-
-        //uint16_t rc5_data = decode_rc5_manchester(symbols, received_symbols);
-        //if (rc5_data = 0) {
-            //ESP_LOGI(TAG, "Decoded RC-5 data: 0x%04X", rc5_data);
 
             uint8_t command = 0; //rc5_data; // Extract the 6-bit command
             for (int i = 0; i < received_symbols; i++) {
@@ -164,15 +158,11 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
             if (rc5_task_handle != NULL) {
                 xTaskNotify(rc5_task_handle, command, eSetValueWithOverwrite);
             }
-        //}
-    }
+            }
 
     // Re-start the receiver for the next packet
-    esp_err_t err = rmt_receive(channel, rc5_buffer, sizeof(rc5_buffer), &receive_config);
-    if (err != ESP_OK) {
-        //ESP_LOGE(TAG, "Failed to re-enable RMT receive: %s", esp_err_to_name(err));
-    }
-
+    rmt_receive(channel, rc5_buffer, sizeof(rc5_buffer), &receive_config);
+    
     return false; // No need to yield to a higher-priority task
 }
 
