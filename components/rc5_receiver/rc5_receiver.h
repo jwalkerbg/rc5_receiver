@@ -19,12 +19,12 @@ extern "C" {
 #endif
 
 // RMT configuration
-#define RMT_RX_GPIO GPIO_NUM_4
-#define RMT_CLK_RES_HZ 1000000    // 1µs resolution
-#define RC5_BUFFER_SIZE 64
-#define RC5_EXPECTED_BITS 14
-#define RC5_SYMBOL_DURATION_US 889       // Manchester symbol duration (approximately 889 µs)
-#define RC5_TOLERANCE_US 200             // Tolerance for signal timing (±200 µs)
+#define RMT_RX_GPIO CONFIG_RC5_RX_GPIO                              // GPIO pin for RMT receiver
+#define RC5_INVERT_IN CONFIG_RC5_INVERT_IN                          // Invert input signal
+#define RMT_CLK_RES_HZ CONFIG_RMT_CLK_RES_HZ                        // Resolution
+#define RC5_BUFFER_SIZE CONFIG_RC5_BUFFER_SIZE                      // RMT buffer size
+#define RC5_SYMBOL_DURATION_US CONFIG_RC5_SYMBOL_DURATION_US        // Manchester symbol duration (approximately 889 µs)
+#define RC5_TOLERANCE_US CONFIG_RC5_TOLERANCE_US                    // Tolerance for signal timing (±200 µs)
 
 // RC5 command data structure
 typedef union {
@@ -40,6 +40,7 @@ typedef union {
 typedef void (*rc5_handler_t)(rc5_data_t rc5_data);
 
 esp_err_t rc5_setup(rc5_handler_t rc5_handler);
+void rc5_terminate(void);
 
 #ifdef __cplusplus
 }   // extern "C"

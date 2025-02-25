@@ -1,0 +1,42 @@
+
+menu "RC5 Receiver Configuration"
+
+    config RC5_RX_GPIO
+        int "RC5 Receiver GPIO Pin"
+        default 4
+        range 0 39
+        help
+            GPIO pin used for RC5 receiver input.
+
+    config RC5_INVERT_IN
+        bool "Invert RC5 Input Signal"
+        default y
+        help
+            If enabled, the input signal will be inverted.
+
+    config RMT_CLK_RES_HZ
+        int "RMT Clock Resolution (Hz)"
+        default 1000000
+        help
+            Clock resolution for the RMT peripheral, default is 1 MHz (1 μs resolution).
+
+    config RC5_BUFFER_SIZE
+        int "RC5 Buffer Size"
+        default 64
+        range 20 64
+        help
+            Number of symbols in the RC5 receive buffer.
+
+    config RC5_SYMBOL_DURATION_US
+        int "RC5 Symbol Duration (μs)"
+        default 899
+        help
+            Duration of a single RC5 symbol in microseconds.
+
+    config RC5_TOLERANCE_US
+        int "RC5 Tolerance (μs)"
+        default 200
+        help
+            Tolerance for signal duration in microseconds.
+
+    endmenu

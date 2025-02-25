@@ -4,6 +4,8 @@
 
 static char* TAG = "RC5";
 
+#define RC5_TERMINATE (0xffff)
+
 static TaskHandle_t rc5_task_handle = NULL;
 
 rmt_symbol_word_t rc5_buffer[RC5_BUFFER_SIZE];
@@ -14,8 +16,12 @@ rmt_receive_config_t receive_config = {
     .signal_range_max_ns = 30 * 1000 * 1000,
 };
 
-// RMT receive done callback
+static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count);
 
+// RMT receiver callback function
+// This function is called when the RMT receiver has received a packet.
+// It copies the received symbols to a buffer and notifies the main task to process the command.
+// The main task will then decode the RC-5 command and call the user-defined handler.
 IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *edata, void *user_ctx)
 {
     BaseType_t pxHigherPriorityTaskWoken = pdFALSE;
@@ -42,9 +48,11 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
     return pxHigherPriorityTaskWoken == pdTRUE; // No need to yield to a higher-priority task
 }
 
-static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count);
-
-// Main task to handle received RC-5 commands
+// RC5 receive task
+// This task is responsible for processing the received RC-5 commands.
+// It waits for a notification from the RMT receiver callback and decodes the RC-5 command.
+// The decoded command is then passed to the user-defined handler.
+//
 void rc5_receive_task(void *arg)
 {
     uint32_t num_symbols;
@@ -53,6 +61,9 @@ void rc5_receive_task(void *arg)
     ESP_LOGI(TAG, "RC5 receive task started");
     while (true) {
         if (xTaskNotifyWait(0, 0, &num_symbols, portMAX_DELAY)) {
+            if (num_symbols == RC5_TERMINATE) {
+                break;
+            }
             ESP_LOGI(TAG, "Handling %lu symbols", num_symbols);
             for (int i = 0; i < num_symbols; i++) {
                 ESP_LOGD(TAG, "Symbol %d: %04lX: %4d %4d %d %d", i, rc5_buffer_cp[i].val, rc5_buffer_cp[i].duration0, rc5_buffer_cp[i].duration1, rc5_buffer_cp[i].level0, rc5_buffer_cp[i].level1);
@@ -68,6 +79,21 @@ void rc5_receive_task(void *arg)
     vTaskDelete(NULL);
 }
 
+// Terminate the RC5 receiver task
+// This function is called to terminate the RC5 receiver task.
+// It sends a notification to the task to terminate.
+// The task will then exit the loop and delete itself.
+void rc5_terminate(void)
+{
+    if (rc5_task_handle != NULL) {
+        xTaskNotify(rc5_task_handle, RC5_TERMINATE, eSetValueWithOverwrite);
+    }
+}
+
+// RC5 decoder
+// This function decodes the received RC-5 symbols and returns the decoded command.
+// The RC-5 protocol uses Manchester encoding, where a logical 0 is represented by a short high pulse followed by a long low pulse,
+// and a logical 1 is represented by a long high pulse followed by a short low pulse.
 static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
 {
     rc5_data_t rc_data = { 0 };
@@ -109,7 +135,7 @@ esp_err_t rc5_setup(rc5_handler_t rc5_handler)
         .resolution_hz = RMT_CLK_RES_HZ, // 1us resolution
         .mem_block_symbols = RC5_BUFFER_SIZE,
         .flags = {
-            .invert_in = 1,
+            .invert_in = RC5_INVERT_IN ? 1 : 0,
             .with_dma = 0,
             .io_loop_back = 0,
             .allow_pd = 0,
