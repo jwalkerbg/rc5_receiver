@@ -1,5 +1,14 @@
 // rc5_receiver.c
 
+#include "sdkconfig.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "driver/rmt_types.h"
+#include "driver/rmt_rx.h"
+#include "esp_log.h"
+
 #include "rc5_receiver.h"
 
 static char* TAG = "RC5";

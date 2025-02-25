@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "sdkconfig.h"
+#include "freertos/FreeRTOS.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
 
 #include "rc5_receiver.h"

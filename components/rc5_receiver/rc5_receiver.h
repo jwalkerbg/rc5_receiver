@@ -5,14 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <inttypes.h>
-#include "sdkconfig.h"
 #include "esp_err.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/gpio.h"
-#include "driver/rmt_types.h"
-#include "driver/rmt_rx.h"
-#include "esp_log.h"
 
 #ifdef __cplusplus
 extern "C" {
