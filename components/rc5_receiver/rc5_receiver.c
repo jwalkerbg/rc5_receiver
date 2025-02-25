@@ -75,7 +75,7 @@ void rc5_receive_task(void *arg)
             if (num_symbols == RC5_TERMINATE) {
                 break;
             }
-            ESP_LOGI(TAG, "Handling %lu symbols", num_symbols);
+            ESP_LOGD(TAG, "Handling %lu symbols", num_symbols);
             for (int i = 0; i < num_symbols; i++) {
                 ESP_LOGD(TAG, "Symbol %d: %04lX: %4d %4d %d %d", i, rc5_buffer_cp[i].val, rc5_buffer_cp[i].duration0, rc5_buffer_cp[i].duration1, rc5_buffer_cp[i].level0, rc5_buffer_cp[i].level1);
             }
