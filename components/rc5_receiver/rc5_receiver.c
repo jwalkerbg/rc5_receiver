@@ -6,6 +6,7 @@ static char* TAG = "RC5";
 
 #define RC5_TERMINATE (0xffff)
 
+static rmt_channel_handle_t rx_channel = NULL;
 static TaskHandle_t rc5_task_handle = NULL;
 
 rmt_symbol_word_t rc5_buffer[RC5_BUFFER_SIZE];
@@ -17,6 +18,7 @@ rmt_receive_config_t receive_config = {
 };
 
 static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count);
+static void rc5_auto_repeat_handler(rc5_data_t rc5_data, rc5_handler_t rc5h);
 
 // RMT receiver callback function
 // This function is called when the RMT receiver has received a packet.
@@ -71,23 +73,12 @@ void rc5_receive_task(void *arg)
             rc5_data_t rc5_data = rc5_decoder(rc5_buffer_cp, num_symbols);
 
             if (rc5h != NULL) {
-                rc5h(rc5_data);
+                rc5_auto_repeat_handler(rc5_data, rc5h);
             }
         }
     }
     ESP_LOGI(TAG, "RC5 receive task ended");
     vTaskDelete(NULL);
-}
-
-// Terminate the RC5 receiver task
-// This function is called to terminate the RC5 receiver task.
-// It sends a notification to the task to terminate.
-// The task will then exit the loop and delete itself.
-void rc5_terminate(void)
-{
-    if (rc5_task_handle != NULL) {
-        xTaskNotify(rc5_task_handle, RC5_TERMINATE, eSetValueWithOverwrite);
-    }
 }
 
 // RC5 decoder
@@ -123,6 +114,64 @@ static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
     return rc_data;
 }
 
+// State variables for auto-repeat functionality
+static bool auto_repeat_enabled = true;
+static int repeat_counter = 0;
+static int repeat_threshold = 5;
+static uint8_t last_toggle_bit = 0xFF;
+static uint16_t last_command = 0xFFFF;
+
+// Mutex for thread safety
+static SemaphoreHandle_t auto_repeat_mutex = NULL;
+
+// Auto-repeat handler
+// This function handles the auto-repeat functionality for RC5 commands.
+// It keeps track of the last command and toggle bit received and repeats the command based on the threshold.
+// If the threshold is set to 1, the command will be repeated indefinitely.
+static void rc5_auto_repeat_handler(rc5_data_t rc5_data, rc5_handler_t rc5h)
+{
+    bool repeat_enabled = false;
+    int threshold = 1;
+
+    // Safely read shared variables
+    if (xSemaphoreTake(auto_repeat_mutex, portMAX_DELAY) == pdTRUE) {
+        repeat_enabled = auto_repeat_enabled;
+        threshold = repeat_threshold;
+        xSemaphoreGive(auto_repeat_mutex);
+    }
+
+    if ((rc5_data.command == last_command) && (rc5_data.toggle == last_toggle_bit)) {
+        // Repeated command
+        if (repeat_enabled) {
+            repeat_counter++;
+            if (repeat_counter >= threshold) {
+                rc5h(rc5_data);         // Call app handler on n-th repeat
+                repeat_counter = 0;     // Reset repeat counter
+            }
+        }
+    } else {
+        // New command
+        rc5h(rc5_data);                     // Call app handler immediately
+        last_command = rc5_data.command;    // Update last command
+        last_toggle_bit = rc5_data.toggle;  // Update toggle bit
+        repeat_counter = 0;                 // Reset repeat counter
+    }
+}
+
+// Set auto-repeat mode
+// This function enables or disables the auto-repeat mode for RC5 commands.
+// The auto-repeat mode allows the same command to be repeated multiple times with a threshold.
+// The user can set the threshold to determine how many times the command should be repeated before calling the handler.
+// If the threshold is set to 1, the command will be repeated indefinitely.
+void set_auto_repeat(bool enabled, int threshold)
+{
+    if (xSemaphoreTake(auto_repeat_mutex, portMAX_DELAY) == pdTRUE) {
+        auto_repeat_enabled = enabled;
+        repeat_threshold = threshold > 0 ? threshold : 1; // Avoid invalid threshold
+        xSemaphoreGive(auto_repeat_mutex);
+    }
+}
+
 // RC5 setup
 // This function initializes the RC5 receiver.
 // It configures the RMT receiver channel and starts the receiver.
@@ -132,6 +181,13 @@ esp_err_t rc5_setup(rc5_handler_t rc5_handler)
 {
     if (rc5_handler == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (auto_repeat_mutex == NULL) {
+        auto_repeat_mutex = xSemaphoreCreateMutex();
+        if (auto_repeat_mutex == NULL) {
+            ESP_LOGD(TAG,"Failed to create mutex!");
+        }
     }
 
     rmt_rx_channel_config_t rx_config = {
@@ -147,7 +203,6 @@ esp_err_t rc5_setup(rc5_handler_t rc5_handler)
         },
     };
 
-    rmt_channel_handle_t rx_channel = NULL;
     ESP_ERROR_CHECK(rmt_new_rx_channel(&rx_config, &rx_channel));
 
     rmt_rx_event_callbacks_t cbs = {
@@ -161,6 +216,19 @@ esp_err_t rc5_setup(rc5_handler_t rc5_handler)
     xTaskCreate(rc5_receive_task, "rc5_receive_task", 4096, rc5_handler, 10, &rc5_task_handle);
 
     return ESP_OK;
+}
+
+// Terminate the RC5 receiver task
+// This function is called to terminate the RC5 receiver task.
+// It sends a notification to the task to terminate.
+// The task will then exit the loop and delete itself.
+void rc5_terminate(void)
+{
+    rmt_disable(rx_channel);
+    rmt_del_channel(rx_channel);
+    if (rc5_task_handle != NULL) {
+        xTaskNotify(rc5_task_handle, RC5_TERMINATE, eSetValueWithOverwrite);
+    }
 }
 
 // end of rc5_receiver.c
