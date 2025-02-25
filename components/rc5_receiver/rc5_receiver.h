@@ -18,6 +18,8 @@ extern "C" {
 #define RC5_BUFFER_SIZE CONFIG_RC5_BUFFER_SIZE                      // RMT buffer size
 #define RC5_SYMBOL_DURATION_US CONFIG_RC5_SYMBOL_DURATION_US        // Manchester symbol duration (approximately 889 µs)
 #define RC5_TOLERANCE_US CONFIG_RC5_TOLERANCE_US                    // Tolerance for signal timing (±200 µs)
+#define RC5_AUTO_REPEAT_ENABLE CONFIG_RC5_AUTO_REPEAT_ENABLE        // Enable auto-repeat
+#define RC5_AUTO_REPEAT_POSTSCALER CONFIG_RC5_AUTO_REPEAT_POSTSCALER  // Auto-repeat postscaler
 
 // RC5 command data structure
 typedef union {

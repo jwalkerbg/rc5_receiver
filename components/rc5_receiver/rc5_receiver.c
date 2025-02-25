@@ -124,9 +124,9 @@ static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
 }
 
 // State variables for auto-repeat functionality
-static bool auto_repeat_enabled = true;
+static bool auto_repeat_enabled = RC5_AUTO_REPEAT_ENABLE;
 static int repeat_counter = 0;
-static int repeat_threshold = 5;
+static int repeat_postscaler = RC5_AUTO_REPEAT_POSTSCALER;
 static uint8_t last_toggle_bit = 0xFF;
 static uint16_t last_command = 0xFFFF;
 
@@ -135,17 +135,17 @@ static SemaphoreHandle_t auto_repeat_mutex = NULL;
 
 // Auto-repeat handler
 // This function handles the auto-repeat functionality for RC5 commands.
-// It keeps track of the last command and toggle bit received and repeats the command based on the threshold.
-// If the threshold is set to 1, the command will be repeated indefinitely.
+// It keeps track of the last command and toggle bit received and repeats the command based on the postscaler.
+// If the postscaler is set to 1, the command will be repeated indefinitely.
 static void rc5_auto_repeat_handler(rc5_data_t rc5_data, rc5_handler_t rc5h)
 {
     bool repeat_enabled = false;
-    int threshold = 1;
+    int postscaler = 1;
 
     // Safely read shared variables
     if (xSemaphoreTake(auto_repeat_mutex, portMAX_DELAY) == pdTRUE) {
         repeat_enabled = auto_repeat_enabled;
-        threshold = repeat_threshold;
+        postscaler = repeat_postscaler;
         xSemaphoreGive(auto_repeat_mutex);
     }
 
@@ -153,7 +153,7 @@ static void rc5_auto_repeat_handler(rc5_data_t rc5_data, rc5_handler_t rc5h)
         // Repeated command
         if (repeat_enabled) {
             repeat_counter++;
-            if (repeat_counter >= threshold) {
+            if (repeat_counter >= postscaler) {
                 rc5h(rc5_data);         // Call app handler on n-th repeat
                 repeat_counter = 0;     // Reset repeat counter
             }
@@ -169,14 +169,14 @@ static void rc5_auto_repeat_handler(rc5_data_t rc5_data, rc5_handler_t rc5h)
 
 // Set auto-repeat mode
 // This function enables or disables the auto-repeat mode for RC5 commands.
-// The auto-repeat mode allows the same command to be repeated multiple times with a threshold.
-// The user can set the threshold to determine how many times the command should be repeated before calling the handler.
-// If the threshold is set to 1, the command will be repeated indefinitely.
-void set_auto_repeat(bool enabled, int threshold)
+// The auto-repeat mode allows the same command to be repeated multiple times with a postscaler.
+// The user can set the postscaler to determine how many times the command should be repeated before calling the handler.
+// If the postscaler is set to 1, the command will be repeated indefinitely.
+void set_auto_repeat(bool enabled, int postscaler)
 {
     if (xSemaphoreTake(auto_repeat_mutex, portMAX_DELAY) == pdTRUE) {
         auto_repeat_enabled = enabled;
-        repeat_threshold = threshold > 0 ? threshold : 1; // Avoid invalid threshold
+        repeat_postscaler = postscaler > 0 ? postscaler : 1;    // Avoid invalid postscaler
         xSemaphoreGive(auto_repeat_mutex);
     }
 }

@@ -39,4 +39,17 @@ menu "RC5 Receiver Configuration"
         help
             Tolerance for signal duration in microseconds.
 
+    config RC5_AUTO_REPEAT_ENABLE
+        bool "Enable Auto Repeat Handling"
+        default y
+        help
+            Enable handling of auto-repeat RC5 commands.
+
+    config RC5_AUTO_REPEAT_POSTSCALER
+        int "Auto Repeat Postscaler"
+        default 5
+        range 1 255
+        help
+            Postscaler value to determine how often auto-repeat commands are processed.
+
     endmenu
