@@ -123,6 +123,11 @@ static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
     return rc_data;
 }
 
+// RC5 setup
+// This function initializes the RC5 receiver.
+// It configures the RMT receiver channel and starts the receiver.
+// It also creates the RC5 receive task to process the received commands.
+// The user-defined handler is called with the decoded RC5 command.
 esp_err_t rc5_setup(rc5_handler_t rc5_handler)
 {
     if (rc5_handler == NULL) {
