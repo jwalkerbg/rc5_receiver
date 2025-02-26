@@ -108,4 +108,51 @@ The component includes error handling mechanisms to ensure robust operation. If 
 
 These implementation details ensure that the RC5 receiver component operates efficiently and reliably, providing accurate decoding of RC5 remote control signals and flexible handling of auto-repeat functionality.
 
+### Configuration Settings
 
+The RC5 receiver component can be configured using the following options in the `Kconfig` file:
+
+#### `CONFIG_RC5_RX_GPIO`
+- **Description**: GPIO pin used for RC5 receiver input.
+- **Type**: Integer
+- **Default**: `4`
+- **Range**: `0` to `39`
+
+#### `CONFIG_RC5_INVERT_IN`
+- **Description**: Invert the RC5 input signal.
+- **Type**: Boolean
+- **Default**: `y` (enabled)
+
+#### `CONFIG_RMT_CLK_RES_HZ`
+- **Description**: Clock resolution for the RMT peripheral.
+- **Type**: Integer
+- **Default**: `1000000` (1 MHz)
+
+#### `CONFIG_RC5_BUFFER_SIZE`
+- **Description**: Number of symbols in the RC5 receive buffer.
+- **Type**: Integer
+- **Default**: `64`
+- **Range**: `20` to `64`
+
+#### `CONFIG_RC5_SYMBOL_DURATION_US`
+- **Description**: Duration of a single RC5 symbol in microseconds.
+- **Type**: Integer
+- **Default**: `899`
+
+#### `CONFIG_RC5_TOLERANCE_US`
+- **Description**: Tolerance for signal duration in microseconds.
+- **Type**: Integer
+- **Default**: `200`
+
+#### `CONFIG_RC5_AUTO_REPEAT_ENABLE`
+- **Description**: Enable handling of auto-repeat RC5 commands.
+- **Type**: Boolean
+- **Default**: `y` (enabled)
+
+#### `CONFIG_RC5_AUTO_REPEAT_POSTSCALER`
+- **Description**: Postscaler value to determine how often auto-repeat commands are processed.
+- **Type**: Integer
+- **Default**: `5`
+- **Range**: `1` to `255`
+
+These configuration options allow you to customize the behavior of the RC5 receiver component to suit your application's requirements. You can adjust the GPIO pin, invert the input signal, set the clock resolution, buffer size, symbol duration, tolerance, and configure the auto-repeat functionality as needed.
