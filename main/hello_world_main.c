@@ -18,7 +18,7 @@ static char* TAG = "RC5APP";
 // RC5 handler
 void rc5_handler(rc5_data_t rc5_data)
 {
-    ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d", rc5_data.frame, rc5_data.command, rc5_data.address, rc5_data.toggle);
+    ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d, start: %d", rc5_data.frame, rc5_data.command, rc5_data.address, rc5_data.toggle, rc5_data.start);
 }
 
 // Application main

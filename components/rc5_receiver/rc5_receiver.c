@@ -81,6 +81,11 @@ void rc5_receive_task(void *arg)
             }
             rc5_data_t rc5_data = rc5_decoder(rc5_buffer_cp, num_symbols);
 
+            if (rc5_data.start != 3) {
+                // Invalid command
+                ESP_LOGD(TAG, "Invalid command");
+                continue;
+            }
             if (rc5h != NULL) {
                 rc5_auto_repeat_handler(rc5_data, rc5h);
             }

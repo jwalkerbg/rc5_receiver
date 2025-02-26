@@ -27,7 +27,8 @@ typedef union {
         uint16_t command:6;
         uint16_t address:5;
         uint16_t toggle:1;
-        uint16_t reserved:4;
+        uint16_t start:2;
+        uint16_t reserved:2;
     };
     uint16_t frame;
 } rc5_data_t;   // RC5 command data structure
