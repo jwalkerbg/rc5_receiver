@@ -90,9 +90,9 @@ The RC5 receiver component is implemented in the `rc5_receiver.c` file. Below ar
 
 The `rc5_receiver_init` function initializes the RC5 receiver by configuring the necessary hardware peripherals and setting up the interrupt service routine (ISR) to handle incoming RC5 signals. It also registers the provided callback function to process the decoded RC5 commands.
 
-#### Signal Decoding
+#### Signal receiving
 
-The RC5 signal decoding is handled by a combination of the ISR and a dedicated task. When an RC5 signal is detected, the ISR captures the received RMT symbols and stores them in an internal buffer `rmt_symbol_word_t rc5_buffer_cp[RC5_BUFFER_SIZE]`. The ISR then notifies the `rc5_receive_task` thread, which performs the actual decoding by calling the `rc5_decoder` function. Once decoding is complete, the decoded command is passed to the registered callback function.
+The input signals (rmt symbols) are received in `rmt_symbol_word_t rc5_buffer[RC5_BUFFER_SIZE]`. After a RC5 packet si received, `rmt_rx_done_callback` is called. It copied received symbols from `rmt_symbol_word_t rc5_buffer[RC5_BUFFER_SIZE]`to `rmt_symbol_word_t rc5_buffer_cp[RC5_BUFFER_SIZE]`. Then it notifies the `rc5_receive_task` thread, which performs the actual decoding by calling the `rc5_decoder` function. Once decoding is complete, the decoded command is passed to the registered callback function. After this notification, `rmt_rx_done_callback` calls ` rmt_receive` so as to initiate new receiver session.
 
 #### Auto-Repeat Handling
 
