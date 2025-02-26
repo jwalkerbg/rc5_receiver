@@ -11,6 +11,9 @@
 extern "C" {
 #endif
 
+// Version information
+#define RC5_RECEIVER_VERSION CONFIG_RC5_RECEIVER_VERSION
+
 // RMT configuration
 #define RMT_RX_GPIO CONFIG_RC5_RX_GPIO                              // GPIO pin for RMT receiver
 #define RC5_INVERT_IN CONFIG_RC5_INVERT_IN                          // Invert input signal

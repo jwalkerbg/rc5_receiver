@@ -1,6 +1,12 @@
 
 menu "RC5 Receiver Configuration"
 
+    config RC5_RECEIVER_VERSION
+        string "RC5 Receiver Version"
+        default "1.0.0"
+        help
+            Define the version of the RC5 Receiver component.
+
     config RC5_RX_GPIO
         int "RC5 Receiver GPIO Pin"
         default 4
