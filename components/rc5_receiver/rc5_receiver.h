@@ -35,7 +35,7 @@ typedef union {
 typedef void (*rc5_handler_t)(rc5_data_t rc5_data);
 
 void set_auto_repeat(bool enabled, int threshold);
-esp_err_t rc5_setup(rc5_handler_t rc5_handler);
+esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler);
 void rc5_terminate(void);
 
 #ifdef __cplusplus

@@ -186,7 +186,7 @@ void set_auto_repeat(bool enabled, int postscaler)
 // It configures the RMT receiver channel and starts the receiver.
 // It also creates the RC5 receive task to process the received commands.
 // The user-defined handler is called with the decoded RC5 command.
-esp_err_t rc5_setup(rc5_handler_t rc5_handler)
+esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler)
 {
     if (rc5_handler == NULL) {
         return ESP_ERR_INVALID_ARG;

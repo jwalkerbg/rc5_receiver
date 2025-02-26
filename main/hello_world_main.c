@@ -32,5 +32,5 @@ void app_main(void)
     ESP_ERROR_CHECK(gpio_config(&io_rmt_conf));
 
     vTaskDelay(pdMS_TO_TICKS(5000));
-    rc5_setup(rc5_handler);
+    rc5_receiver_init(rc5_handler);
 }
