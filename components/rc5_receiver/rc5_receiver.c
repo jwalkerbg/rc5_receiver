@@ -111,7 +111,7 @@ static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
 
         if (accept_bit) {
             rc_data.frame = (rc_data.frame << 1) | symbols[i].level1;
-            if (symbols[i].duration1 < 1050) {
+            if (symbols[i].duration1 < (RC5_SYMBOL_DURATION_US + RC5_TOLERANCE_US)) {
                 accept_bit = false;
             }
         }
