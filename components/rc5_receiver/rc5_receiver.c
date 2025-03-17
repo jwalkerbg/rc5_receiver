@@ -11,12 +11,33 @@
 
 #include "rc5_receiver.h"
 
-static char* TAG = "RC5";
+static char* TAG = "RC5RCV";
+
+// RMT configuration
+#define RMT_RX_GPIO CONFIG_RC5_RX_GPIO                              // GPIO pin for RMT receiver
+#define RC5_INVERT_IN CONFIG_RC5_INVERT_IN                          // Invert input signal
+#define RMT_CLK_RES_HZ CONFIG_RMT_CLK_RES_HZ                        // Resolution
+#define RC5_BUFFER_SIZE CONFIG_RC5_BUFFER_SIZE                      // RMT buffer size
+#define RC5_SYMBOL_DURATION_US CONFIG_RC5_SYMBOL_DURATION_US        // Manchester symbol duration (approximately 889 µs)
+#define RC5_TOLERANCE_US CONFIG_RC5_TOLERANCE_US                    // Tolerance for signal timing (±200 µs)
+#define RC5_LONG_PRESS_THRESHOLD CONFIG_RC5_LONG_PRESS_THRESHOLD    // Number of frames before detecting a long press
+#define RC5_FRAME_INTERVAL pdMS_TO_TICKS(CONFIG_RC5_FRAME_INTERVAL) // 107ms frame rate
 
 #define RC5_TERMINATE (0xffff)
 
-static rmt_channel_handle_t rx_channel = NULL;
-static TaskHandle_t rc5_task_handle = NULL;
+// RC5 state structure
+typedef struct {
+    rc5_data_t last_button;
+    uint8_t frame_count;
+    bool long_press_active;
+    rmt_channel_handle_t rx_channel;
+    TaskHandle_t rc5_task_handle;
+    TimerHandle_t timer;
+    rc5_handler_t event_callback;
+    SemaphoreHandle_t mutex;
+} rc5_state_t;
+
+static rc5_state_t rc5_state = { 0 };
 
 rmt_symbol_word_t rc5_buffer[RC5_BUFFER_SIZE];
 rmt_symbol_word_t rc5_buffer_cp[RC5_BUFFER_SIZE];
@@ -27,13 +48,14 @@ rmt_receive_config_t receive_config = {
 };
 
 static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count);
-static void rc5_auto_repeat_handler(rc5_data_t rc5_data, rc5_handler_t rc5h);
+static void rc5_event_handler(rc5_data_t rc5_data);
 
 // RMT receiver callback function
 // This function is called when the RMT receiver has received a packet.
 // It copies the received symbols to a buffer and notifies the main task to process the command.
 // The main task will then decode the RC-5 command and call the user-defined handler.
-IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *edata, void *user_ctx)
+
+static IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *edata, void *user_ctx)
 {
     BaseType_t pxHigherPriorityTaskWoken = pdFALSE;
 
@@ -48,8 +70,8 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
         }
 
         // Notify the main task to process the command
-        if (rc5_task_handle != NULL) {
-            xTaskNotifyFromISR(rc5_task_handle, num_symbols, eSetValueWithOverwrite, &pxHigherPriorityTaskWoken);
+        if (rc5_state.rc5_task_handle != NULL) {
+            xTaskNotifyFromISR(rc5_state.rc5_task_handle, num_symbols, eSetValueWithOverwrite, &pxHigherPriorityTaskWoken);
         }
     }
 
@@ -63,11 +85,10 @@ IRAM_ATTR bool rmt_rx_done_callback(rmt_channel_handle_t channel, const rmt_rx_d
 // This task is responsible for processing the received RC-5 commands.
 // It waits for a notification from the RMT receiver callback and decodes the RC-5 command.
 // The decoded command is then passed to the user-defined handler.
-//
-void rc5_receive_task(void *arg)
+
+static void rc5_receive_task(void *arg)
 {
     uint32_t num_symbols;
-    rc5_handler_t rc5h = (rc5_handler_t)arg;
 
     ESP_LOGI(TAG, "RC5 receive task started");
     while (true) {
@@ -86,9 +107,7 @@ void rc5_receive_task(void *arg)
                 ESP_LOGD(TAG, "Invalid command");
                 continue;
             }
-            if (rc5h != NULL) {
-                rc5_auto_repeat_handler(rc5_data, rc5h);
-            }
+            rc5_event_handler(rc5_data);
         }
     }
     ESP_LOGI(TAG, "RC5 receive task ended");
@@ -99,6 +118,7 @@ void rc5_receive_task(void *arg)
 // This function decodes the received RC-5 symbols and returns the decoded command.
 // The RC-5 protocol uses Manchester encoding, where a logical 0 is represented by a short high pulse followed by a long low pulse,
 // and a logical 1 is represented by a long high pulse followed by a short low pulse.
+
 static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
 {
     rc5_data_t rc_data = { 0 };
@@ -129,60 +149,108 @@ static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
 }
 
 // State variables for auto-repeat functionality
-static bool auto_repeat_enabled = RC5_AUTO_REPEAT_ENABLE;
-static int repeat_counter = 0;
-static int repeat_postscaler = RC5_AUTO_REPEAT_POSTSCALER;
-static uint8_t last_toggle_bit = 0xFF;
-static uint16_t last_command = 0xFFFF;
 
-// Mutex for thread safety
-static SemaphoreHandle_t auto_repeat_mutex = NULL;
+// Timer callback to handle missing frames (button release detection)
 
-// Auto-repeat handler
-// This function handles the auto-repeat functionality for RC5 commands.
-// It keeps track of the last command and toggle bit received and repeats the command based on the postscaler.
-// If the postscaler is set to 1, the command will be repeated indefinitely.
-static void rc5_auto_repeat_handler(rc5_data_t rc5_data, rc5_handler_t rc5h)
+// void rc5_timer_callback(TimerHandle_t xTimer)
+// Input:
+//   xTimer: Timer handle
+// Description:  This function is called when the timer expires.
+// It is used to detect the end of a button press (short press) or a long press.
+// If a button press is detected, it triggers the appropriate event (short press or long press end).
+// If no button press is detected, it resets the state.
+
+static void rc5_timer_callback(TimerHandle_t xTimer)
 {
-    bool repeat_enabled = false;
-    int postscaler = 1;
-
-    // Safely read shared variables
-    if (xSemaphoreTake(auto_repeat_mutex, portMAX_DELAY) == pdTRUE) {
-        repeat_enabled = auto_repeat_enabled;
-        postscaler = repeat_postscaler;
-        xSemaphoreGive(auto_repeat_mutex);
-    }
-
-    if ((rc5_data.command == last_command) && (rc5_data.toggle == last_toggle_bit)) {
-        // Repeated command
-        if (repeat_enabled) {
-            repeat_counter++;
-            if (repeat_counter >= postscaler) {
-                rc5h(rc5_data);         // Call app handler on n-th repeat
-                repeat_counter = 0;     // Reset repeat counter
+    if (xSemaphoreTake(rc5_state.mutex, portMAX_DELAY)) {  // Lock mutex
+        if (rc5_state.last_button.frame != 0) {  // A button was active
+            if (rc5_state.long_press_active) {
+                rc5_state.event_callback(RC5_EVENT_LONG_PRESS_END, rc5_state.last_button);
+            } else {
+                rc5_state.event_callback(RC5_EVENT_SHORT_PRESS, rc5_state.last_button);
             }
+            // Reset state
+            rc5_state.last_button.frame = 0;
+            rc5_state.frame_count = 0;
+            rc5_state.long_press_active = false;
         }
-    } else {
-        // New command
-        rc5h(rc5_data);                     // Call app handler immediately
-        last_command = rc5_data.command;    // Update last command
-        last_toggle_bit = rc5_data.toggle;  // Update toggle bit
-        repeat_counter = 0;                 // Reset repeat counter
+        xSemaphoreGive(rc5_state.mutex);  // Unlock mutex
     }
 }
 
-// Set auto-repeat mode
-// This function enables or disables the auto-repeat mode for RC5 commands.
-// The auto-repeat mode allows the same command to be repeated multiple times with a postscaler.
-// The user can set the postscaler to determine how many times the command should be repeated before calling the handler.
-// If the postscaler is set to 1, the command will be repeated indefinitely.
-void set_auto_repeat(bool enabled, int postscaler)
+// static void rc5_event_handler(rc5_data_t rc5_data)
+// Input:
+//   rc5_data: Decoded RC5 command data
+// Description:  This function processes the decoded RC5 command data and triggers the appropriate event.
+// It handles short press, long press start, and long press end events.
+// The event is determined based on the number of frames received and the timing of the frames.
+// It works in conjunction with the timer to detect long press events.
+static void rc5_event_handler(rc5_data_t rc5_data)
 {
-    if (xSemaphoreTake(auto_repeat_mutex, portMAX_DELAY) == pdTRUE) {
-        auto_repeat_enabled = enabled;
-        repeat_postscaler = postscaler > 0 ? postscaler : 1;    // Avoid invalid postscaler
-        xSemaphoreGive(auto_repeat_mutex);
+    if (xSemaphoreTake(rc5_state.mutex, portMAX_DELAY)) {  // Lock mutex
+        if (rc5_data.command != rc5_state.last_button.command) {
+            // New button press detected, we need to reset the state
+            rc5_state.last_button = rc5_data;
+            rc5_state.frame_count = 1;
+            rc5_state.long_press_active = false;
+        }
+        else {
+            // Continue counting frames
+            rc5_state.frame_count++;
+            if (!rc5_state.long_press_active && rc5_state.frame_count >= RC5_LONG_PRESS_THRESHOLD) {
+                rc5_state.event_callback(RC5_EVENT_LONG_PRESS_START, rc5_data);
+                rc5_state.long_press_active = true;
+            }
+        }
+
+        // Ensure timer starts or resets properly
+        if (xTimerIsTimerActive(rc5_state.timer) == pdFALSE) {
+            xTimerStart(rc5_state.timer, 0);
+        } else {
+            xTimerReset(rc5_state.timer, 0);
+        }
+
+        xSemaphoreGive(rc5_state.mutex);  // Unlock mutex
+    }
+}
+
+// void rc5_set_event_callback(rc5_handler_t callback)
+// Input:
+//   callback: User-defined callback function to handle RC5 events
+// Description:  This function sets the user-defined callback function to handle RC5 events.
+// The callback function should have the following signature:
+// void rc5_event_handler(rc5_event_t event, rc5_data_t rc5_data);
+// The callback function will be called with the following parameters:
+//   - event: The type of RC5 event (short press, long press start, long press end)
+//   - rc5_data: The decoded RC5 command data
+// The callback function should be defined by the user and should handle the RC5 events as needed.
+void rc5_set_event_callback(rc5_handler_t callback)
+{
+    if (xSemaphoreTake(rc5_state.mutex, portMAX_DELAY)) {
+        rc5_state.event_callback = callback;
+        xSemaphoreGive(rc5_state.mutex);
+    }
+}
+
+// const char* rc5_event_name(rc5_event_t event)
+// Input:
+//   event: RC5 event event
+// Output:
+//   const char*: String representation of the RC5 event type
+// Description:  This function takes an RC5 event type (`rc5_event_t`) and returns
+// a corresponding string representation. This is useful for logging or debugging purposes.
+
+const char* rc5_event_name(rc5_event_t event)
+{
+    switch (event) {
+        case RC5_EVENT_SHORT_PRESS:
+            return "SHORT_PRESS";
+        case RC5_EVENT_LONG_PRESS_START:
+            return "LONG_PRESS_START";
+        case RC5_EVENT_LONG_PRESS_END:
+            return "LONG_PRESS_END";
+        default:
+            return "UNKNOWN";
     }
 }
 
@@ -197,11 +265,27 @@ esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (auto_repeat_mutex == NULL) {
-        auto_repeat_mutex = xSemaphoreCreateMutex();
-        if (auto_repeat_mutex == NULL) {
-            ESP_LOGD(TAG,"Failed to create mutex!");
-        }
+    rc5_state.mutex = xSemaphoreCreateMutex();
+    if (rc5_state.mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create mutex!");
+        return ESP_ERR_NO_MEM;
+    }
+
+    // Set user-defined callback
+    rc5_set_event_callback(rc5_handler);
+
+    gpio_config_t io_rmt_conf = {
+        .pin_bit_mask = 1ULL << RMT_RX_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_rmt_conf));
+
+    // Initialize timer
+    rc5_state.timer = xTimerCreate("RC5_Timer", RC5_FRAME_INTERVAL * 2, pdFALSE, NULL, rc5_timer_callback);
+    if (rc5_state.timer == NULL) {
+        ESP_LOGE(TAG, "Failed to create RC5 Event timer.");
+        return ESP_ERR_NO_MEM;
     }
 
     rmt_rx_channel_config_t rx_config = {
@@ -217,17 +301,30 @@ esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler)
         },
     };
 
-    ESP_ERROR_CHECK(rmt_new_rx_channel(&rx_config, &rx_channel));
+    ESP_ERROR_CHECK(rmt_new_rx_channel(&rx_config, &rc5_state.rx_channel));
 
     rmt_rx_event_callbacks_t cbs = {
         .on_recv_done = rmt_rx_done_callback, // Set the callback function
     };
 
-    ESP_ERROR_CHECK(rmt_rx_register_event_callbacks(rx_channel, &cbs, NULL));
-    ESP_ERROR_CHECK(rmt_enable(rx_channel));
-    ESP_ERROR_CHECK(rmt_receive(rx_channel, rc5_buffer, sizeof(rc5_buffer), &receive_config));
+    ESP_ERROR_CHECK(rmt_rx_register_event_callbacks(rc5_state.rx_channel, &cbs, NULL));
+    ESP_ERROR_CHECK(rmt_enable(rc5_state.rx_channel));
+    ESP_ERROR_CHECK(rmt_receive(rc5_state.rx_channel, rc5_buffer, sizeof(rc5_buffer), &receive_config));
 
-    xTaskCreate(rc5_receive_task, "rc5_receive_task", 4096, rc5_handler, 10, &rc5_task_handle);
+    if (xTaskCreate(rc5_receive_task, "rc5_receive_task", 4096, rc5_handler, 10, &rc5_state.rc5_task_handle)  != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create RC5 receive task.");
+
+        if (rc5_state.rx_channel != NULL) {
+            rmt_disable(rc5_state.rx_channel);
+            rmt_del_channel(rc5_state.rx_channel);
+        }
+        if (rc5_state.timer != NULL) {
+            xTimerStop(rc5_state.timer, 0);
+            xTimerDelete(rc5_state.timer, 0);
+        }
+
+        return ESP_ERR_NO_MEM;
+    }
 
     return ESP_OK;
 }
@@ -238,10 +335,16 @@ esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler)
 // The task will then exit the loop and delete itself.
 void rc5_terminate(void)
 {
-    rmt_disable(rx_channel);
-    rmt_del_channel(rx_channel);
-    if (rc5_task_handle != NULL) {
-        xTaskNotify(rc5_task_handle, RC5_TERMINATE, eSetValueWithOverwrite);
+    rmt_disable(rc5_state.rx_channel);
+    rmt_del_channel(rc5_state.rx_channel);
+    if (rc5_state.rc5_task_handle != NULL) {
+        xTaskNotify(rc5_state.rc5_task_handle, RC5_TERMINATE, eSetValueWithOverwrite);
+    }
+    if (rc5_state.timer != NULL) {
+        xTimerDelete(rc5_state.timer, 0);
+    }
+    if (rc5_state.mutex != NULL) {
+        vSemaphoreDelete(rc5_state.mutex);
     }
 }
 

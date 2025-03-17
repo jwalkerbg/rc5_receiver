@@ -14,15 +14,12 @@ extern "C" {
 // Version information
 #define RC5_RECEIVER_VERSION CONFIG_RC5_RECEIVER_VERSION
 
-// RMT configuration
-#define RMT_RX_GPIO CONFIG_RC5_RX_GPIO                              // GPIO pin for RMT receiver
-#define RC5_INVERT_IN CONFIG_RC5_INVERT_IN                          // Invert input signal
-#define RMT_CLK_RES_HZ CONFIG_RMT_CLK_RES_HZ                        // Resolution
-#define RC5_BUFFER_SIZE CONFIG_RC5_BUFFER_SIZE                      // RMT buffer size
-#define RC5_SYMBOL_DURATION_US CONFIG_RC5_SYMBOL_DURATION_US        // Manchester symbol duration (approximately 889 µs)
-#define RC5_TOLERANCE_US CONFIG_RC5_TOLERANCE_US                    // Tolerance for signal timing (±200 µs)
-#define RC5_AUTO_REPEAT_ENABLE CONFIG_RC5_AUTO_REPEAT_ENABLE        // Enable auto-repeat
-#define RC5_AUTO_REPEAT_POSTSCALER CONFIG_RC5_AUTO_REPEAT_POSTSCALER  // Auto-repeat postscaler
+// Events
+typedef enum {
+    RC5_EVENT_SHORT_PRESS,
+    RC5_EVENT_LONG_PRESS_START,
+    RC5_EVENT_LONG_PRESS_END
+} rc5_event_t;
 
 // RC5 command data structure
 typedef union {
@@ -36,11 +33,12 @@ typedef union {
     uint16_t frame;
 } rc5_data_t;   // RC5 command data structure
 
-typedef void (*rc5_handler_t)(rc5_data_t rc5_data);
+typedef void (*rc5_handler_t)(rc5_event_t event, rc5_data_t rc5_data);
 
-void set_auto_repeat(bool enabled, int threshold);
+void rc5_set_event_callback(rc5_handler_t callback);
 esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler);
 void rc5_terminate(void);
+const char* rc5_event_name(rc5_event_t event);
 
 #ifdef __cplusplus
 }   // extern "C"
