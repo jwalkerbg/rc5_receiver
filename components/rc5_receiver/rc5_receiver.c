@@ -11,7 +11,7 @@
 
 #include "rc5_receiver.h"
 
-static char* TAG = "RC5RCV";
+static char TAG[] = "RC5RCV";
 
 // RMT configuration
 #define RMT_RX_GPIO CONFIG_RC5_RX_GPIO                              // GPIO pin for RMT receiver
@@ -33,7 +33,7 @@ typedef struct {
     rmt_channel_handle_t rx_channel;
     TaskHandle_t rc5_task_handle;
     TimerHandle_t timer;
-    rc5_handler_t event_callback;
+    QueueHandle_t queue;
     SemaphoreHandle_t mutex;
 } rc5_state_t;
 
@@ -162,12 +162,19 @@ static rc5_data_t rc5_decoder(rmt_symbol_word_t* symbols, size_t count)
 
 static void rc5_timer_callback(TimerHandle_t xTimer)
 {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    rc5_context_t rc5;
+
     if (xSemaphoreTake(rc5_state.mutex, portMAX_DELAY)) {  // Lock mutex
         if (rc5_state.last_button.frame != 0) {  // A button was active
             if (rc5_state.long_press_active) {
-                rc5_state.event_callback(RC5_EVENT_LONG_PRESS_END, rc5_state.last_button);
+                rc5.event = RC5_EVENT_LONG_PRESS_END;
+                rc5.rc5_data = rc5_state.last_button;
+                xQueueSendFromISR(rc5_state.queue, &rc5, &xHigherPriorityTaskWoken);  // Send long press end event
             } else {
-                rc5_state.event_callback(RC5_EVENT_SHORT_PRESS, rc5_state.last_button);
+                rc5.event = RC5_EVENT_SHORT_PRESS;
+                rc5.rc5_data = rc5_state.last_button;
+                xQueueSendFromISR(rc5_state.queue, &rc5, &xHigherPriorityTaskWoken);  // Send short press event
             }
             // Reset state
             rc5_state.last_button.frame = 0;
@@ -175,6 +182,10 @@ static void rc5_timer_callback(TimerHandle_t xTimer)
             rc5_state.long_press_active = false;
         }
         xSemaphoreGive(rc5_state.mutex);  // Unlock mutex
+        // Yield if needed
+        if (xHigherPriorityTaskWoken == pdTRUE) {
+            portYIELD_FROM_ISR();
+        }
     }
 }
 
@@ -187,6 +198,8 @@ static void rc5_timer_callback(TimerHandle_t xTimer)
 // It works in conjunction with the timer to detect long press events.
 static void rc5_event_handler(rc5_data_t rc5_data)
 {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
     if (xSemaphoreTake(rc5_state.mutex, portMAX_DELAY)) {  // Lock mutex
         if (rc5_data.command != rc5_state.last_button.command) {
             // New button press detected, we need to reset the state
@@ -198,7 +211,10 @@ static void rc5_event_handler(rc5_data_t rc5_data)
             // Continue counting frames
             rc5_state.frame_count++;
             if (!rc5_state.long_press_active && rc5_state.frame_count >= RC5_LONG_PRESS_THRESHOLD) {
-                rc5_state.event_callback(RC5_EVENT_LONG_PRESS_START, rc5_data);
+                rc5_context_t rc5;
+                rc5.event = RC5_EVENT_LONG_PRESS_START;
+                rc5.rc5_data = rc5_state.last_button;
+                xQueueSendFromISR(rc5_state.queue, &rc5, &xHigherPriorityTaskWoken);  // Send long press start event
                 rc5_state.long_press_active = true;
             }
         }
@@ -224,10 +240,10 @@ static void rc5_event_handler(rc5_data_t rc5_data)
 //   - event: The type of RC5 event (short press, long press start, long press end)
 //   - rc5_data: The decoded RC5 command data
 // The callback function should be defined by the user and should handle the RC5 events as needed.
-void rc5_set_event_callback(rc5_handler_t callback)
+void rc5_set_event_callback(QueueHandle_t queue)
 {
     if (xSemaphoreTake(rc5_state.mutex, portMAX_DELAY)) {
-        rc5_state.event_callback = callback;
+        rc5_state.queue = queue;
         xSemaphoreGive(rc5_state.mutex);
     }
 }
@@ -259,9 +275,9 @@ const char* rc5_event_name(rc5_event_t event)
 // It configures the RMT receiver channel and starts the receiver.
 // It also creates the RC5 receive task to process the received commands.
 // The user-defined handler is called with the decoded RC5 command.
-esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler)
+esp_err_t rc5_receiver_init(QueueHandle_t  queue)
 {
-    if (rc5_handler == NULL) {
+    if (queue == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -272,7 +288,7 @@ esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler)
     }
 
     // Set user-defined callback
-    rc5_set_event_callback(rc5_handler);
+    rc5_set_event_callback(queue);
 
     gpio_config_t io_rmt_conf = {
         .pin_bit_mask = 1ULL << RMT_RX_GPIO,
@@ -284,6 +300,9 @@ esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler)
     // Initialize timer
     rc5_state.timer = xTimerCreate("RC5_Timer", RC5_FRAME_INTERVAL * 2, pdFALSE, NULL, rc5_timer_callback);
     if (rc5_state.timer == NULL) {
+        if (rc5_state.mutex != NULL) {
+            vSemaphoreDelete(rc5_state.mutex);
+        }
         ESP_LOGE(TAG, "Failed to create RC5 Event timer.");
         return ESP_ERR_NO_MEM;
     }
@@ -311,21 +330,19 @@ esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler)
     ESP_ERROR_CHECK(rmt_enable(rc5_state.rx_channel));
     ESP_ERROR_CHECK(rmt_receive(rc5_state.rx_channel, rc5_buffer, sizeof(rc5_buffer), &receive_config));
 
-    if (xTaskCreate(rc5_receive_task, "rc5_receive_task", 4096, rc5_handler, 10, &rc5_state.rc5_task_handle)  != pdPASS) {
+    if (xTaskCreate(rc5_receive_task, "rc5_receive_task", 4096, NULL, 10, &rc5_state.rc5_task_handle)  != pdPASS) {
         ESP_LOGE(TAG, "Failed to create RC5 receive task.");
 
         if (rc5_state.rx_channel != NULL) {
             rmt_disable(rc5_state.rx_channel);
             rmt_del_channel(rc5_state.rx_channel);
         }
-        if (rc5_state.timer != NULL) {
-            xTimerStop(rc5_state.timer, 0);
-            xTimerDelete(rc5_state.timer, 0);
-        }
-
+        rc5_terminate();
+        ESP_LOGE(TAG, "Failed to create RC5 receive task.");
         return ESP_ERR_NO_MEM;
     }
 
+    ESP_LOGI(TAG, "RC5 receiver initialized on GPIO %d", RMT_RX_GPIO);
     return ESP_OK;
 }
 

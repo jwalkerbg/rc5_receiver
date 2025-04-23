@@ -15,22 +15,31 @@
 
 static char* TAG = "RC5APP";
 
+static QueueHandle_t rc5_queue = NULL;
+
 // RC5 handler
-void rc5_handler(rc5_data_t rc5_data)
+void rc5_handler(void* param)
 {
-    ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d, start: %d", rc5_data.frame, rc5_data.command, rc5_data.address, rc5_data.toggle, rc5_data.start);
+    rc5_context_t rc5;
+    ESP_LOGI(TAG, "RC5 handler started");
+    QueueHandle_t q = (QueueHandle_t)param;
+    while (true) {
+        if (xQueueReceive(q, &rc5, portMAX_DELAY) == pdTRUE) {
+            ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d, start: %d, event: %s",
+                rc5.rc5_data.frame, rc5.rc5_data.command, rc5.rc5_data.address, rc5.rc5_data.toggle, rc5.rc5_data.start,rc5_event_name(rc5.event));
+            if (rc5.event == RC5_EVENT_INVAID) {
+                break;
+            }
+        }
+    }
+    ESP_LOGI(TAG, "RC5 handler terminated");
+    vTaskDelete(NULL);
 }
 
 // Application main
 void app_main(void)
 {
-    gpio_config_t io_rmt_conf = {
-        .pin_bit_mask = 1ULL << RMT_RX_GPIO,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-    };
-    ESP_ERROR_CHECK(gpio_config(&io_rmt_conf));
-
     vTaskDelay(pdMS_TO_TICKS(5000));
-    rc5_receiver_init(rc5_handler);
+    rc5_queue = xQueueCreate(10, sizeof(rc5_context_t));
+    rc5_receiver_init(rc5_queue);
 }

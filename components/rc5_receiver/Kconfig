@@ -11,7 +11,7 @@ menu "RC5 Receiver Configuration"
 
         config RC5_RECEIVER_VERSION
             string "RC5 Receiver Version"
-            default "2.0.0"
+            default "2.1.0"
             help
                 Define the version of the RC5 Receiver component.
 
@@ -64,6 +64,13 @@ menu "RC5 Receiver Configuration"
             default 107
             help
                 Interval in milliseconds between RC5 frames.
+
+        config RC5_ADDRESS
+            int "RC5 Address"
+            default 15
+            range 0 31
+            help
+                RC5 address for the remote control.
     endif
 
 endmenu

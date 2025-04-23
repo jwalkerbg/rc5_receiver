@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include "freertos/queue.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -18,7 +19,8 @@ extern "C" {
 typedef enum {
     RC5_EVENT_SHORT_PRESS,
     RC5_EVENT_LONG_PRESS_START,
-    RC5_EVENT_LONG_PRESS_END
+    RC5_EVENT_LONG_PRESS_END,
+    RC5_EVENT_INVAID = 255
 } rc5_event_t;
 
 // RC5 command data structure
@@ -33,10 +35,13 @@ typedef union {
     uint16_t frame;
 } rc5_data_t;   // RC5 command data structure
 
-typedef void (*rc5_handler_t)(rc5_event_t event, rc5_data_t rc5_data);
+typedef struct {
+    rc5_event_t event;         // Event type (Short press, long press start, long press end)
+    rc5_data_t rc5_data;      // RC5 command data
+} rc5_context_t;
 
-void rc5_set_event_callback(rc5_handler_t callback);
-esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler);
+void rc5_set_event_callback(QueueHandle_t queue);
+esp_err_t rc5_receiver_init(QueueHandle_t queue);
 void rc5_terminate(void);
 const char* rc5_event_name(rc5_event_t event);
 
