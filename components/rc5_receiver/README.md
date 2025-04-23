@@ -16,17 +16,33 @@ This ESP-IDF component is designed for receiving RC5 infrared remote control sig
 
 ### Example
 ```c
-// Callback function to process received RC5 commands
+static QueueHandle_t rc5_queue = NULL;
+// A thread that waits RC5 commands via queue and process them
 void rc5_handler(rc5_event_t event, rc5_data_t rc5_data)
 {
-    // Process the command (send messages, generate events etc)
-    process_rc5_command(event, rc5_data);
+    rc5_context_t rc5;
+    ESP_LOGI(TAG, "RC5 handler started");
+    QueueHandle_t q = (QueueHandle_t)param;
+    while (true) {
+        if (xQueueReceive(q, &rc5, portMAX_DELAY) == pdTRUE) {
+            // processing command
+            ESP_LOGI(TAG, "RC5 frame: 0x%04X, command: 0x%02X, address: 0x%02X, toggle: %d, start: %d, event: %s",
+                rc5.rc5_data.frame, rc5.rc5_data.command, rc5.rc5_data.address, rc5.rc5_data.toggle, rc5.rc5_data.start,rc5_event_name(rc5.event));
+            // exit if a termination message is received
+            if (rc5.event == RC5_EVENT_INVAID) {
+                break;
+            }
+        }
+    }
+    ESP_LOGI(TAG, "RC5 handler terminated");
+    vTaskDelete(NULL);
 }
-
+static QueueHandle_t rc5_queue = NULL;
 void app_main(void)
 {
     // Initialize the RC5 receiver with the callback function
-    rc5_receiver_init(rc5_handler);
+    rc5_queue = xQueueCreate(10, sizeof(rc5_context_t));
+    rc5_receiver_init(rc5_queue);
 
     // Main loop
     while (true) {
@@ -88,18 +104,32 @@ Following `enum` defines the event types that RC5 Receiver can generate.
 typedef enum {
     RC5_EVENT_SHORT_PRESS,           // the key was short ressed
     RC5_EVENT_LONG_PRESS_START,      // long press has began
-    RC5_EVENT_LONG_PRESS_END         // long press has ended
+    RC5_EVENT_LONG_PRESS_END,        // long press has ended
+    RC5_EVENT_INVAID = 255
 } rc5_event_t;
 ```
+
+### rc5_context_t
+
+The received commands re packed in a C struct of a type `rc5_context_t`:
+
+```ctypedef struct {
+    rc5_event_t event;        // Event type (Short press, long press start, long press end)
+    rc5_data_t rc5_data;      // RC5 command data
+} rc5_context_t;
+```
+
+Received of this data type is sent to supplied by the application rc5_received handler. A queue of this type is used to do this.
+
 The following functions are available in the RC5 receiver component:
 
-### `esp_err_t rc5_receiver_init(rc5_handler_t rc5_handler)`
+### `esp_err_t rc5_receiver_init(QueueHandle_t queue)`
 
 Initialize the RC5 receiver.
 
 - **Description**: This function initializes the RC5 receiver with the provided handler. It sets up the necessary configurations and prepares the receiver for operation.
 - **Parameters**:
-    - `rc5_handler`: A handler function of type `rc5_handler_t` to process received RC5 signals.
+    - `queue`: A handle to a queue, where RC5 component will put received RC5 commands.
 - **Returns**: `ESP_OK` on successful initialization, or an error code on failure.
 
 ### `void rc5_terminate(void)`
@@ -108,12 +138,12 @@ Terminate the RC5 receiver.
 
 - **Description**: This function terminates the RC5 receiver, releasing any resources that were allocated during initialization. It should be called when the receiver is no longer needed.
 
-### Callback Function
+### Callback thread
 
-The prototype of the callback function is as follows:
+The prototype of the callback thread is as follows:
 
 ```c
-void rc5_handler(rc5_event_t event, rc5_data_t rc5_data);
+void rc5_handler(QueueHandle_t queue);
 ```
 
 ## Implementation details.
@@ -123,10 +153,6 @@ The RC5 receiver component is implemented in the `rc5_receiver.c` file. Below ar
 ### Initialization
 
 The `rc5_receiver_init` function initializes the RC5 receiver by configuring the necessary hardware peripherals and setting up the interrupt service routine (ISR) to handle incoming RC5 signals. It also registers the provided callback function to process the decoded RC5 commands.
-
-### Set callback function
-
-The `rc5_set_event_callback(rc5_handler_t callback)` sets a callback function. Usualy it is set through `rc5_receiver_init`. However, this function gives flexibility to change behavior in runtime.
 
 ### Signal receiving
 
